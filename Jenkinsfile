@@ -11,7 +11,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/YOUR_USERNAME/fullstack-devops-project.git'
+                git 'https://github.com/sohamrasal/fullstack-devops-project.git'
             }
         }
 
