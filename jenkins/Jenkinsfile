@@ -1,7 +1,0 @@
-pipeline {
-  agent any
-  stages {
-    stage('Build Backend'){ steps { sh 'cd backend && mvn clean package' } }
-    stage('Build Frontend'){ steps { sh 'cd frontend && npm install' } }
-  }
-}
