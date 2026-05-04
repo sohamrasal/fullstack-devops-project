@@ -57,5 +57,11 @@
             </plugin>
         </plugins>
     </build>
-
+<distributionManagement>
+    <repository>
+        <id>nexus</id> 
+        <url>http://k8s-nexus-nexusing-b92cb36a87-467731962.ap-south-1.elb.amazonaws.com/repository/maven-releases/</url>
+    </repository>
+</distributionManagement>
+         
 </project>
