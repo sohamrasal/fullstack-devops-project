@@ -1,43 +1,87 @@
 pipeline {
-    agent any
+    agent { label 'agent-ec2' }
+
+    tools {
+        maven 'Maven'
+    }
 
     environment {
-        AWS_ACCOUNT_ID = "837402981643"
-        REGION = "ap-south-1"
-        REPO = "backend-repo"
+        AWS_REGION = 'ap-south-1'
+        ECR_REPO = '837402981643.dkr.ecr.ap-south-1.amazonaws.com/backend-repo'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        NEXUS_URL = 'http://http://k8s-nexus-nexusing-b92cb36a87-467731962.ap-south-1.elb.amazonaws.com/'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                git 'https://github.com/sohamrasal/fullstack-devops-project.git'
+                git branch: 'main',
+                    url: 'https://github.com/sohamrasal/fullstack-devops-project.git'
             }
         }
 
-        stage('Build JAR') {
+        stage('Build Backend') {
             steps {
                 dir('backend') {
-                    sh 'mvn clean package -DskipTests'
+                    sh 'mvn clean install -DskipTests'
+                }
+            }
+        }
+
+        stage('Sonar Scan') {
+            steps {
+                dir('backend') {
+                    withSonarQubeEnv('sonar-server') {
+                        sh '''
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=fullstack-devops-project \
+                        -Dsonar.projectName=fullstack-devops-project
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Upload Artifact to Nexus') {
+            steps {
+                dir('backend') {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                        sh '''
+                        JAR=$(ls target/*.jar | head -n 1)
+
+                        echo "Uploading $JAR to Nexus..."
+
+                        curl -v -u $USER:$PASS \
+                          --upload-file $JAR \
+                          $NEXUS_URL/repository/maven-releases/backend/${BUILD_NUMBER}/backend-${BUILD_NUMBER}.jar
+                        '''
+                    }
                 }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                dir('backend') {
-                    sh '''
-                    docker build -t $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest .
-                    '''
-                }
+                sh '''
+                docker build -t $ECR_REPO:$IMAGE_TAG ./backend
+                '''
             }
         }
 
         stage('Login to ECR') {
             steps {
                 sh '''
-                aws ecr get-login-password --region $REGION | \
-                docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+                aws ecr get-login-password --region $AWS_REGION | \
+                docker login --username AWS --password-stdin $ECR_REPO
                 '''
             }
         }
@@ -45,7 +89,7 @@ pipeline {
         stage('Push Image') {
             steps {
                 sh '''
-                docker push $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPO:latest
+                docker push $ECR_REPO:$IMAGE_TAG
                 '''
             }
         }
@@ -53,7 +97,13 @@ pipeline {
         stage('Deploy to EKS') {
             steps {
                 sh '''
+                echo "Deploying to Kubernetes..."
+
                 kubectl apply -f k8s/backend-deployment.yaml
+                kubectl apply -f k8s/backend-service.yaml
+                kubectl apply -f k8s/backend-ingress.yaml
+
+                kubectl rollout status deployment backend
                 '''
             }
         }
